@@ -1,5 +1,5 @@
 -----Practice 0 ------ Transaction Modes Autocomit-----------
-
+// Some changes for git.
 /// Aici Smitha este in db, johnas nu este, in rezultat nici o inregistrare nu este inscrisa in Db
 INSERT INTO person (Name) Values ('Johnas'), ('Smitha')
 
