@@ -1,0 +1,621 @@
+-----Practice 0 ------ Transaction Modes Autocomit-----------
+
+/// Aici Smitha este in db, johnas nu este, in rezultat nici o inregistrare nu este inscrisa in Db
+INSERT INTO person (Name) Values ('Johnas'), ('Smitha')
+
+
+ /// Aici avemn acelasi scenariu insa inregistrarea care nu este in Db va fi stocata in Db
+select * from Person;
+
+INSERT INTO person (Name) Values ('Johnas')
+INSERT INTO person (Name) Values ('Smitha')
+
+
+
+------Practice 1---- Implicit transaction mode-------------
+
+SET IMPLICIT_TRANSACTIONS ON;
+
+select * from students;
+
+print @@TRANCOUNT
+
+INSERT INTO students (Name) Values ('Johna')
+INSERT INTO students (Name) Values ('Smitha')
+ROLLBACK
+
+
+---------Practice 2 -----------
+
+SET IMPLICIT_TRANSACTIONS OFF;
+
+select * from students;
+
+print @@TRANCOUNT
+
+BEGIN TRAN
+
+INSERT INTO students (Name) Values ('Johna')
+INSERT INTO students (Name) Values ('Smitha')
+
+select * from students
+ROLLBACK
+select * from students
+
+
+-----------Practice 3---------------
+
+// aici este un element care este in DB, insa acel camp este unic, rezulta ca trebuie sa dea error la duplicate, 
+// aici cand avem un duplica in insert se realizeaza rollback la toata tranzactia
+
+use Conq
+SET IMPLICIT_TRANSACTIONS On;
+
+print CONCAT('@@TRANCOUT before transaction:', @@TRANCOUNT);
+
+begin try
+	begin tran;
+		print CONCAT('@@TRANCOUNT in transaction: ', @@TRANCOUNT);
+
+		INSERT INTO person ( Name) Values ('Billy')
+		INSERT INTO Person (Name ) Values ('Smitha')
+		INSERT INTO Person (Name ) Values ('TrueMan')
+    commit;
+end try
+begin catch
+		rollback;
+		print 'Catch Exception'
+end catch
+print CONCAT('QQTRANCOUNT after commit: ', @@TRANCOUNT);
+
+select * from dbo.Person
+
+// Insa in urmatorul caz desi avem o eroare de duplicat, celelalte inserturi valide vor fi scrise in DB
+
+print CONCAT('@@TRANCOUT before transaction:', @@TRANCOUNT);
+
+	begin tran;
+		print CONCAT('@@TRANCOUNT in transaction: ', @@TRANCOUNT);
+
+		INSERT INTO person ( Name) Values ('Billy')
+		INSERT INTO Person (Name ) Values ('Smitha')
+		INSERT INTO Person (Name ) Values ('TrueMan')
+    commit;
+
+select * from dbo.Person
+
+
+// --------------- Practice 4 ---- NESTED TRANSACTIONS ------------- 
+
+SELECT 'Before Staring any Transaction', @@TRANCOUNT 
+
+BEGIN TRANSACTION TRAN1
+	
+	SELECT 'After Staring First Transaction', @@TRANCOUNT 
+        -- Second Transaction Start
+	BEGIN TRANSACTION TRAN2 
+		
+		SELECT 'After Staring Second Transaction', @@TRANCOUNT 
+
+	COMMIT TRANSACTION TRAN2
+        -- End Of Second Transaction 
+	SELECT 'After Commiting the Second Transaction', @@TRANCOUNT 
+
+COMMIT TRANSACTION TRAN1
+
+SELECT 'After Commiting the First Transaction', @@TRANCOUNT
+
+
+// ---------------- Dirty Read  Scenario-------------------------
+
+step 1
+
+CREATE TABLE BankDetailTbl
+(
+  Id            INT
+  PRIMARY KEY IDENTITY(1, 1), 
+  AccountNumber VARCHAR(40), 
+  ClientName    VARCHAR(100), 
+  Balance       MONEY);
+  
+step 2
+
+ INSERT INTO BankDetailTbl
+VALUES
+('7Y290394', 'Betty H. Bonds', '78');
+
+step 3
+
+Now we will execute the following queries, the Query-1 updates the balance value 
+of the particular bank account, and then it will wait 20 seconds and rollback the 
+data modification. At this moment, we will immediately execute the Query-2, and this 
+query reads the modified but uncommitted data.
+
+query 1
+
+BEGIN TRAN;
+UPDATE BankDetailTbl
+SET 
+    Balance=Balance-45
+WHERE AccountNumber = '7Y290394';
+WAITFOR DELAY '00:00:20';
+ROLLBACK TRAN;
+ 
+SELECT *
+FROM BankDetailTbl
+WHERE AccountNumber = '7Y290394';
+
+query 2
+
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+BEGIN TRAN;
+SELECT *
+FROM BankDetailTbl
+WHERE AccountNumber = '7Y290394';
+COMMIT TRAN;
+
+
+// NON-REPEATABLE READ CONCURRENCY
+ Here is the situation(not problem) where users got different result because between selects we hava an update
+-- Transaction 1
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED
+BEGIN TRANSACTION
+SELECT Balance FROM BankDetailTbl WHERE Id = 1
+-- Do Some work
+WAITFOR DELAY '00:00:15'
+SELECT  Balance FROM BankDetailTbl WHERE Id = 1
+COMMIT TRANSACTION
+
+-- Transaction 2
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED
+UPDATE BankDetailTbl SET Balance = 33 WHERE Id = 1
+
+In order to deal with this situation  we will use the  Repeatable Read Transaction Isolation Level
+ or any other higher isolation level such as Snapshot or Serializable.
+ 
+ -- Transaction 1
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+BEGIN TRANSACTION
+SELECT Balance FROM BankDetailTbl WHERE Id = 1
+-- Do Some work
+WAITFOR DELAY '00:00:15'
+SELECT  Balance FROM BankDetailTbl WHERE Id = 1
+COMMIT TRANSACTION
+
+
+-- Transaction 2
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+UPDATE BankDetailTbl SET Balance = 78 WHERE Id = 1
+
+With the above changes in place, now run transaction 1 
+first and then the second transaction and we will see 
+that it gives the same result for both the read in transaction 1. 
+When we execute Transaction 1 and 2 from 2 different instances of 
+SQL Server management studio, Transaction 2 is blocked until Transaction 1 completes, 
+and at the end of Transaction 1, both the reads get the same value for the Balance field.
+
+
+// Phantom Read Concurrency 
+
+CREATE TABLE Employees
+(
+    Id INT PRIMARY KEY,
+    Name VARCHAR(100),
+    Gender VARCHAR(10)
+)
+Go
+-- Insert some dummy data
+INSERT INTO  Employees VALUES(1001,'Anurag', 'Male')
+INSERT INTO  Employees VALUES(1002,'Priyanka', 'Female')
+INSERT INTO  Employees VALUES(1003,'Pranaya', 'Male')
+INSERT INTO  Employees VALUES(1004,'Hina', 'Female')
+
+-- Transaction 1
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+BEGIN TRANSACTION
+SELECT * FROM Employees where Gender = 'Male'
+-- Do Some work
+WAITFOR DELAY '00:00:10'
+SELECT * FROM Employees where Gender = 'Male'
+COMMIT TRANSACTION
+
+-- Transaction 2
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+BEGIN TRANSACTION
+INSERT into Employees VALUES(1005, 'Sambit', 'Male')
+COMMIT TRANSACTION
+
+here the insert betwenn select will execute and we will get different result of each select from first transaction.
+
+
+In order to deal with this situatin we'll use Serializable or Snapshot Transaction Isolation Level to solve the Phantom Read Concurrency Problem.
+-- Transaction 1
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
+BEGIN TRANSACTION
+SELECT * FROM Employees where Gender = 'Male'
+-- Do Some work
+WAITFOR DELAY '00:00:10'
+SELECT * FROM Employees where Gender = 'Male'
+COMMIT TRANSACTION
+
+-- Transaction 2
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+BEGIN TRANSACTION
+INSERT into Employees VALUES(1005, 'Sambit', 'Male')
+COMMIT TRANSACTION
+
+Now we will get the same results
+
+
+// Lost updates
+
+CREATE TABLE Products
+(
+    Id INT PRIMARY KEY,
+    Name VARCHAR(100),
+    Quantity INT
+)
+Go
+-- Insert test data into Products table
+INSERT INTO Products values (1001, 'Mobile', 10)
+INSERT INTO Products values (1002, 'Tablet', 20)
+INSERT INTO Products values (1003, 'Laptop', 30)
+
+-- Transaction 1
+BEGIN TRANSACTION
+  DECLARE @QunatityAvailable int
+  SELECT @QunatityAvailable = Quantity FROM Products WHERE Id=1001
+  -- Transaction takes 10 seconds
+  WAITFOR DELAY '00:00:10'
+  SET @QunatityAvailable = @QunatityAvailable - 1
+  UPDATE Products SET Quantity = @QunatityAvailable  WHERE Id=1001
+  Print @QunatityAvailable
+COMMIT TRANSACTION
+
+-- Transaction 2
+BEGIN TRANSACTION
+  DECLARE @QunatityAvailable int
+  SELECT @QunatityAvailable = Quantity FROM Products WHERE Id=1001
+  SET @QunatityAvailable = @QunatityAvailable - 2
+  UPDATE Products SET Quantity = @QunatityAvailable WHERE Id=1001
+  Print @QunatityAvailable
+COMMIT TRANSACTION
+
+Results - 9, aici updat ul de la tranzactia 2 este pierdut.
+
+How to overcome the Lost Update concurrency situation
+
+-- Transaction 1
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+BEGIN TRANSACTION
+  DECLARE @QunatityAvailable int
+  SELECT @QunatityAvailable = Quantity FROM Products WHERE Id=1001
+  -- Transaction takes 10 seconds
+  WAITFOR DELAY '00:00:10'
+  SET @QunatityAvailable = @QunatityAvailable - 1
+  UPDATE Products SET Quantity = @QunatityAvailable  WHERE Id=1001
+  Print @QunatityAvailable
+COMMIT TRANSACTION
+
+
+-- Transaction 2
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ
+BEGIN TRANSACTION
+  DECLARE @QunatityAvailable int
+  SELECT @QunatityAvailable = Quantity FROM Products WHERE Id=1001
+  SET @QunatityAvailable = @QunatityAvailable - 2
+  UPDATE Products SET Quantity = @QunatityAvailable WHERE Id=1001
+  Print @QunatityAvailable
+COMMIT TRANSACTION
+
+// DEAD LOCK EXAMPLE
+
+-- Create table TableA
+CREATE TABLE TableA
+(
+    ID INT,
+    Name NVARCHAR(50)
+)
+Go
+-- Insert some test data
+INSERT INTO TableA values (101, 'Anurag')
+INSERT INTO TableA values (102, 'Mohanty')
+INSERT INTO TableA values (103, 'Pranaya')
+INSERT INTO TableA values (104, 'Rout')
+INSERT INTO TableA values (105, 'Sambit')
+Go
+-- Create table TableB
+CREATE TABLE TableB
+(
+    ID INT,
+    Name NVARCHAR(50)
+)
+Go
+-- Insert some test data
+INSERT INTO TableB values (1001, 'Priyanka')
+INSERT INTO TableB values (1002, 'Dewagan')
+INSERT INTO TableB values (1003, 'Preety')
+Go
+
+-- Transaction 1
+BEGIN TRANSACTION
+UPDATE TableA SET Name = 'Anurag From Transaction1' WHERE Id = 101
+WAITFOR DELAY '00:00:15'
+UPDATE TableB SET Name = 'Priyanka From Transaction1' WHERE Id = 1001
+COMMIT TRANSACTION
+
+-- Transaction 2
+BEGIN TRANSACTION
+UPDATE TableB SET Name = 'Priyanka From Transaction2' WHERE Id = 1001
+WAITFOR DELAY '00:00:15'
+UPDATE TableA SET Name = 'Anurag From Transaction2' WHERE Id = 101
+Commit Transaction
+
+
+Next
+
+-- Transaction 1
+BEGIN TRANSACTION
+UPDATE TableA Set Name = Name + ' From Transaction 1' 
+WHERE Id IN (101, 102, 103, 104, 105)
+WAITFOR DELAY '00:00:15'
+UPDATE TableB Set Name = Name + ' From Transaction 1' 
+WHERE Id IN (1001, 1002)
+COMMIT TRANSACTION
+
+-- Transaction 2
+BEGIN TRANSACTION
+UPDATE TableB Set Name = Name + ' From Transaction 2' 
+WHERE Id IN (1001, 1002)
+WAITFOR DELAY '00:00:15'
+UPDATE TableA Set Name = Name + ' From Transaction 2' 
+WHERE Id IN (101, 102, 103, 104, 105)
+COMMIT TRANSACTION
+
+
+Next 
+Truncate table TableB
+Truncate table TableA
+
+INSERT INTO TableA values (101, 'Anurag')
+INSERT INTO TableA values (102, 'Mohanty')
+INSERT INTO TableA values (103, 'Pranaya')
+INSERT INTO TableA values (104, 'Rout')
+INSERT INTO TableA values (105, 'Sambit')
+
+INSERT INTO TableB values (1001, 'Priyanka')
+INSERT INTO TableB values (1002, 'Dewagan')
+INSERT INTO TableB values (1003, 'Preety')
+
+-- Transaction 1
+BEGIN TRANSACTION
+UPDATE TableA Set Name = Name + ' From Transaction 1' 
+WHERE Id IN (101, 102, 103, 104, 105)
+
+WAITFOR DELAY '00:00:15'
+
+UPDATE TableB Set Name = Name + ' From Transaction 1' 
+WHERE Id IN (1001, 1002)
+
+COMMIT TRANSACTION
+
+-- Transaction 2
+SET DEADLOCK_PRIORITY HIGH
+GO
+BEGIN TRANSACTION
+UPDATE TableB Set Name = Name + ' From Transaction 2' 
+WHERE Id IN (1001, 1002)
+
+WAITFOR DELAY '00:00:15'
+
+UPDATE TableA Set Name = Name + ' From Transaction 2' 
+WHERE Id IN (101, 102, 103, 104, 105)
+
+COMMIT TRANSACTION
+
+cand selectam rezultetele vedem ca updat-ul sa realizat doar <From Transaction 1>
+
+
+// Deadlock error handling
+
+-- Create table TableA
+CREATE TABLE TableA
+(
+    ID INT,
+    Name NVARCHAR(50)
+)
+Go
+
+-- Insert some test data
+INSERT INTO TableA values (101, 'Anurag')
+INSERT INTO TableA values (102, 'Mohanty')
+Go
+
+-- Create table TableB
+CREATE TABLE TableB
+(
+    ID INT,
+    Name NVARCHAR(50)
+)
+Go
+
+-- Insert some test data
+INSERT INTO TableB values (1001, 'Priyanka')
+INSERT INTO TableB values (1002, 'Dewagan')
+Go
+
+
+CREATE PROCEDURE spTransaction1
+AS
+BEGIN
+    BEGIN TRANSACTION
+  BEGIN TRY
+    UPDATE TableA SET Name = 'Anurag From Transaction 1' 
+    WHERE Id = 101
+
+    WAITFOR DELAY '00:00:10'
+
+    UPDATE TableB SET Name = 'Priyanka From Transaction 2' 
+    WHERE Id = 1001
+
+    -- If both the update statements are succeeded.
+        -- Then there is no Deadlock. 
+    -- So commit the transaction.
+    COMMIT TRANSACTION
+    SELECT 'Transaction Completed Successfully'   
+  END TRY
+  BEGIN CATCH
+       -- Check if the error is deadlock error
+         IF(ERROR_NUMBER() = 1205)
+         BEGIN
+             SELECT 'Deadlock Occurred. The Transaction has failed. Please retry'
+         END
+         -- Rollback the transaction
+         ROLLBACK TRANSACTION
+  END CATCH
+END
+
+
+CREATE PROCEDURE spTransaction2
+AS
+BEGIN
+    BEGIN TRANSACTION
+  BEGIN TRY
+    UPDATE TableB SET Name = 'Priyanka From Transaction 2' 
+    WHERE Id = 1001
+    
+    WAITFOR DELAY '00:00:10'
+  
+    UPDATE TableA SET Name = 'Anurag From Transaction 2' 
+    WHERE Id = 101
+
+    -- If both the update statements are succeeded.
+        -- Then there is no Deadlock. 
+    -- So commit the transaction.
+    COMMIT TRANSACTION
+    SELECT 'Transaction Completed Successfully'  
+  END TRY
+  BEGIN CATCH
+    -- Check if the error is deadlock error
+         IF(ERROR_NUMBER() = 1205)
+         BEGIN
+             SELECT 'Deadlock Occurred. The Transaction has failed. Please retry'
+         END
+         -- Rollback the transaction
+         ROLLBACK TRANSACTION
+  END CATCH
+END
+
+Let’s modify the above-stored procedures to implement the Retry Logic.
+
+ALTER PROCEDURE spTransaction1
+AS
+BEGIN
+  -- Declare and initialize the required variables
+  DECLARE @ErrorMessage NVARCHAR(2000) = '';
+  DECLARE @Iteration INT = 0;
+  DECLARE @IterationLimit INT = 2;
+
+  -- Begin the iteration using WHILE loop
+  -- Conditions for iteration
+    -- @ErrorMessage IS NOT NULL --null indicates successful execution
+    -- @Iteration < @IterationLimit -- do not exceed iteration limit
+  WHILE(@ErrorMessage IS NOT NULL AND @Iteration < @IterationLimit)    
+  BEGIN
+    -- First Increment the iteration counter by 1
+        SET @Iteration += 1;
+
+        -- Attempt to execute the transaction
+    BEGIN TRANSACTION
+    BEGIN TRY
+      UPDATE TableA SET Name = 'Anurag From Transaction 1' 
+      WHERE Id = 101
+
+      WAITFOR DELAY '00:00:05'
+
+      UPDATE TableB SET Name = 'Priyanka From Transaction 2' 
+      WHERE Id = 1001
+
+      -- Capture the error message
+      SET @ErrorMessage = ERROR_MESSAGE()
+
+      -- If both the update statements are succeeded.
+      -- Then there is no Deadlock. 
+      -- So commit the transaction.
+
+      COMMIT TRANSACTION
+      SELECT 'Transaction Completed Successfully'  
+    END TRY
+    BEGIN CATCH
+      -- Check if the error is deadlock error
+       IF(ERROR_NUMBER() = 1205)
+       BEGIN
+         -- Notify if iteration limit is reached
+         IF @Iteration = @IterationLimit
+         BEGIN
+           SELECT 'Iteration reached; last error: ' + @ErrorMessage
+         END
+       END
+       -- Rollback the transaction
+       ROLLBACK TRANSACTION
+    END CATCH
+  END  
+END
+
+Stored Procedure spTransaction2:
+
+ALTER PROCEDURE spTransaction2
+AS
+BEGIN
+  -- Declare and initialize the required variables
+  DECLARE @ErrorMessage NVARCHAR(2000) = '';
+  DECLARE @Iteration INT = 0;
+  DECLARE @IterationLimit INT = 2;
+
+  -- Begin the iteration using WHILE loop
+  -- Conditions for iteration
+    -- @ErrorMessage IS NOT NULL --null indicates successful execution
+    -- @Iteration < @IterationLimit -- do not exceed iteration limit
+  WHILE(@ErrorMessage IS NOT NULL AND @Iteration < @IterationLimit)    
+  BEGIN
+    -- First Increment the iteration counter by 1
+        SET @Iteration += 1;
+
+        -- Attempt to execute the transaction
+    BEGIN TRANSACTION
+    BEGIN TRY
+      UPDATE TableB SET Name = 'Priyanka From Transaction 2' 
+      WHERE Id = 1001
+    
+      WAITFOR DELAY '00:00:05'
+  
+      UPDATE TableA SET Name = 'Anurag From Transaction 2' 
+      WHERE Id = 101
+
+      -- Capture the error message
+      SET @ErrorMessage = ERROR_MESSAGE()
+
+      -- If both the update statements are succeeded.
+      -- Then there is no Deadlock. 
+      -- So commit the transaction.
+
+      COMMIT TRANSACTION
+      SELECT 'Transaction Completed Successfully'  
+    END TRY
+    BEGIN CATCH
+      -- Check if the error is deadlock error
+       IF(ERROR_NUMBER() = 1205)
+       BEGIN
+         -- Notify if iteration limit is reached
+         IF @Iteration = @IterationLimit
+         BEGIN
+           SELECT 'Iteration reached; last error: ' + @ErrorMessage
+         END
+       END
+       -- Rollback the transaction
+       ROLLBACK TRANSACTION
+    END CATCH
+  END  
+END
+
+Now all is working as expected without any deadlock.
